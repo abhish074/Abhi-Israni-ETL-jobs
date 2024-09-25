@@ -1,0 +1,62 @@
+# This code is uses a CSV file stored in S3 bucket and performs the transformation of merging two columns(department name and title)
+# Also, groups counts the records and group the results by 'Industry' and stores the results in an CSV in the S3 bucket. 
+
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from awsglue.job import Job
+
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from pyspark.sql.functions import concat_ws, col
+
+## @params: [JOB_NAME]
+args = getResolvedOptions(sys.argv, ['JOB_NAME'])
+
+## Initialize a SparkContext and GlueContext
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+input_data = glueContext.create_dynamic_frame.from_options(
+    connection_type="s3", 
+    connection_options={"paths": ["s3://myfirst-de-bucket/"]}, 
+    format="csv",  # Change to "json", "parquet", etc. based on your data format
+    format_options={"withHeader": True}
+)
+transformed_data = ApplyMapping.apply(
+    frame=input_data, 
+    mappings=[
+        ("Job_Title", "string", "Job_Title", "string"),
+        ("Industry", "string", "Industry", "string"),
+        ("Salary_USD", "string", "Salary_USD", "string")
+        # Add more columns as needed
+    ]
+
+
+
+)
+
+spark_df = transformed_data.toDF()
+park_df = spark_df.withColumn("JT_Industry", concat_ws("-", col("Job_Title"), col("Industry")))
+
+grouped_df = spark_df.groupBy("Industry").count()
+
+# Collect the result as a list of tuples
+result_list = grouped_df.collect()
+
+# Print the list to view the result
+# print(result_list)
+
+
+output_path = "s3://myfirst-de-bucket/output-etl-poc/"
+grouped_df.write \
+    .format("csv") \
+    .option("header", "true") \
+    .mode("overwrite") \
+    .save(output_path)
+
+
+job.commit()
